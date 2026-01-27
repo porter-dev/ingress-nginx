@@ -24,3 +24,11 @@ We currently build the following versions:
 |--------------------|---------------------|------------------|
 | 4.11.5             | v1.11.5             | porterhub/controller |
 | 4.12.1             | v1.12.1             | porterhub/controller |
+
+## Running a fresh build
+
+The build workflow is set to be triggered manually, using `workflow_dispatch`. To build a fresh image(assuming there's been an update on Chainguard's end):
+1. Navigate to `Actions`, and click on `Build and push ingress-nginx images` on the left sidebar, under `Actions`.
+2. Click on `Run workflow`.
+3. You can specify the upstream tag you want to use(by default it's preferable to use `helm-chart-$VERSION`) or you can leave it be, if you want to build `helm-chart-4.12.1`(which translates to `v1.12.1` upstream). The other fields can be left as-is.
+4. Hit `Run workflow` and then refresh the page, to see the new run.
