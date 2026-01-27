@@ -24,6 +24,10 @@ We currently build the following versions:
 |--------------------|---------------------|------------------|
 | 4.11.5             | v1.11.5             | porterhub/controller |
 | 4.12.1             | v1.12.1             | porterhub/controller |
+| 4.12.8             | v1.12.8             | porterhub/controller |
+| 4.13.0             | v1.13.0             | porterhub/controller |
+| 4.13.4             | v1.13.4             | porterhub/controller |
+| 4.14.0             | v1.14.0             | porterhub/controller |
 
 ## Running a fresh build
 
