@@ -100,4 +100,15 @@ jobs:
           echo "**Docker Org:** \`${{ env.DOCKER_ORG }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Built Images" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${REGISTRY}/ingress-nginx/controller:${VERSION}\`
+          echo "- \`${REGISTRY}/ingress-nginx/controller:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${REGISTRY}/ingress-nginx/controller-chroot:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Helm Override Example" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "helm upgrade --install ingress-nginx ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --repo https://kubernetes.github.io/ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --namespace ingress-nginx --create-namespace \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --set controller.image.registry=${REGISTRY%/*} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --set controller.image.image=${REGISTRY#*/}/ingress-nginx/controller \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --set controller.image.tag=${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
