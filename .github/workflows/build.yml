@@ -79,7 +79,7 @@ jobs:
       - name: Build and push images
         env:
           TAG: ${{ steps.meta.outputs.version }}
-          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}/ingress-nginx
         run: |
           echo "Building from fork: ${{ env.FORK_REPO }}@${{ env.FORK_REF }}"
           echo "Pushing to: ${REGISTRY}"
