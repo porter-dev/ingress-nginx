@@ -72,26 +72,15 @@ jobs:
       - name: Install mage
         run: go install github.com/magefile/mage@latest
         
-      - name: Build images locally (no push)
+      - name: Build and push images
         env:
           TAG: ${{ steps.meta.outputs.version }}
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
         run: |
-          echo "Building images locally..."
-          make build image
-          make build image-chroot
+          echo "Building from fork: ${{ env.FORK_REPO }}@${{ env.FORK_REF }}"
+          echo "Pushing to: ${REGISTRY}"
           
-      - name: Tag and push with correct names
-        env:
-          TAG: ${{ steps.meta.outputs.version }}
-          DOCKER_REPO: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
-        run: |
-          # Tag the locally built images with your desired names
-          docker tag registry.k8s.io/ingress-nginx/controller:${TAG} ${DOCKER_REPO}/ingress-nginx-controller:${TAG}
-          docker tag registry.k8s.io/ingress-nginx/controller-chroot:${TAG} ${DOCKER_REPO}/ingress-nginx-controller-chroot:${TAG}
-          
-          # Push to Docker Hub
-          docker push ${DOCKER_REPO}/ingress-nginx-controller:${TAG}
-          docker push ${DOCKER_REPO}/ingress-nginx-controller-chroot:${TAG}
+          make release
           
       - name: Generate build summary
         run: |
@@ -106,8 +95,8 @@ jobs:
           echo "**Docker Org:** \`${{ env.DOCKER_ORG }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Built Images" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${REGISTRY}/ingress-nginx-controller:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${REGISTRY}/ingress-nginx-controller-chroot:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${REGISTRY}/controller:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${REGISTRY}/controller-chroot:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Helm Override Example" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
@@ -115,6 +104,6 @@ jobs:
           echo "  --repo https://kubernetes.github.io/ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
           echo "  --namespace ingress-nginx --create-namespace \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set controller.image.registry=docker.io \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --set controller.image.image=${REGISTRY#*/}/ingress-nginx-controller \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --set controller.image.image=${REGISTRY#*/}/controller \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set controller.image.tag=${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
