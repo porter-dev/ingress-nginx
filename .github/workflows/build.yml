@@ -72,28 +72,26 @@ jobs:
       - name: Install mage
         run: go install github.com/magefile/mage@latest
         
-      - name: Build and push images with make
+      - name: Build images locally (no push)
         env:
           TAG: ${{ steps.meta.outputs.version }}
-          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
         run: |
-          echo "Building images..."
-          make release
+          echo "Building images locally..."
+          make build image
+          make build image-chroot
           
-      - name: Re-tag and push with desired names
+      - name: Tag and push with correct names
         env:
           TAG: ${{ steps.meta.outputs.version }}
-          OLD_REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
-          NEW_REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          DOCKER_REPO: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
         run: |
-          # Pull the multi-arch manifests that were just pushed
-          docker buildx imagetools create \
-            -t ${NEW_REGISTRY}/ingress-nginx-controller:${TAG} \
-            ${OLD_REGISTRY}/ingress-nginx/controller:${TAG}
+          # Tag the locally built images with your desired names
+          docker tag registry.k8s.io/ingress-nginx/controller:${TAG} ${DOCKER_REPO}/ingress-nginx-controller:${TAG}
+          docker tag registry.k8s.io/ingress-nginx/controller-chroot:${TAG} ${DOCKER_REPO}/ingress-nginx-controller-chroot:${TAG}
           
-          docker buildx imagetools create \
-            -t ${NEW_REGISTRY}/ingress-nginx-controller-chroot:${TAG} \
-            ${OLD_REGISTRY}/ingress-nginx/controller-chroot:${TAG}
+          # Push to Docker Hub
+          docker push ${DOCKER_REPO}/ingress-nginx-controller:${TAG}
+          docker push ${DOCKER_REPO}/ingress-nginx-controller-chroot:${TAG}
           
       - name: Generate build summary
         run: |
