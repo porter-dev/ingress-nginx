@@ -1,4 +1,4 @@
-name: Build and Push ingress-nginx Images from Fork
+name: build+push
 
 on:
   workflow_dispatch:
@@ -8,13 +8,13 @@ on:
         required: false
         default: 'chainguard-forks/ingress-nginx'
       fork_ref:
-        description: 'Branch, tag, or commit to build (e.g., main, v1.14.1)'
+        description: 'Branch, tag, or commit to build (e.g., main, v1.12.1, helm-chart-4.12.1)'
         required: false
         default: 'helm-chart-4.12.1'
       docker_org:
-        description: 'Docker Hub organization/username (defaults to DOCKERHUB_USERNAME secret)'
+        description: 'Docker Hub organization/username (defaults to the DOCKERHUB_USERNAME secret)'
         required: false
-        default: ''
+        default: 'porterhub'
 
 env:
   REGISTRY: docker.io
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     permissions:
       contents: read
       
