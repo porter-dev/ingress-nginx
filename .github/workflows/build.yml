@@ -10,7 +10,7 @@ on:
       fork_ref:
         description: 'Branch, tag, or commit to build (e.g., main, v1.14.1)'
         required: false
-        default: 'main'
+        default: 'helm-chart-4.12.1'
       docker_org:
         description: 'Docker Hub organization/username (defaults to DOCKERHUB_USERNAME secret)'
         required: false
