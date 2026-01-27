@@ -51,58 +51,49 @@ jobs:
       - name: Extract metadata
         id: meta
         run: |
-          # Get version from TAG file or use commit SHA
           if [ -f TAG ]; then
             VERSION=$(cat TAG)
           else
             VERSION="${GITHUB_SHA::8}"
           fi
           
-          # For manual workflow dispatch with specific ref
           if [[ "${{ env.FORK_REF }}" =~ ^v[0-9] ]]; then
             VERSION="${{ env.FORK_REF }}"
           fi
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
-          echo "fork_repo=${{ env.FORK_REPO }}" >> $GITHUB_OUTPUT
-          echo "fork_ref=${{ env.FORK_REF }}" >> $GITHUB_OUTPUT
       
-      - name: Get NGINX base image
-        id: nginx_base
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'GOLANG_VERSION'
+          
+      - name: Install mage
+        run: go install github.com/magefile/mage@latest
+        
+      - name: Build and push images with make
+        env:
+          TAG: ${{ steps.meta.outputs.version }}
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
         run: |
-          if [ -f NGINX_BASE ]; then
-            NGINX_BASE=$(cat NGINX_BASE)
-          else
-            NGINX_BASE="alpine:3.20"
-          fi
-          echo "nginx_base=${NGINX_BASE}" >> $GITHUB_OUTPUT
-      
-      - name: Build and push controller image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./rootfs/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}/ingress-nginx-controller:${{ steps.meta.outputs.version }}
-          build-args: |
-            BASE_IMAGE=${{ steps.nginx_base.outputs.nginx_base }}
-            VERSION=${{ steps.meta.outputs.version }}
-      
-      - name: Build and push controller-chroot image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./images/nginx/rootfs/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}/ingress-nginx-controller-chroot:${{ steps.meta.outputs.version }}
-          build-args: |
-            BASE_IMAGE=${{ steps.nginx_base.outputs.nginx_base }}
-            VERSION=${{ steps.meta.outputs.version }}
+          echo "Building images..."
+          make release
+          
+      - name: Re-tag and push with desired names
+        env:
+          TAG: ${{ steps.meta.outputs.version }}
+          OLD_REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          NEW_REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+        run: |
+          # Pull the multi-arch manifests that were just pushed
+          docker buildx imagetools create \
+            -t ${NEW_REGISTRY}/ingress-nginx-controller:${TAG} \
+            ${OLD_REGISTRY}/ingress-nginx/controller:${TAG}
+          
+          docker buildx imagetools create \
+            -t ${NEW_REGISTRY}/ingress-nginx-controller-chroot:${TAG} \
+            ${OLD_REGISTRY}/ingress-nginx/controller-chroot:${TAG}
           
       - name: Generate build summary
         run: |
@@ -125,7 +116,7 @@ jobs:
           echo "helm upgrade --install ingress-nginx ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
           echo "  --repo https://kubernetes.github.io/ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
           echo "  --namespace ingress-nginx --create-namespace \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --set controller.image.registry=${REGISTRY%/*} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --set controller.image.registry=docker.io \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set controller.image.image=${REGISTRY#*/}/ingress-nginx-controller \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set controller.image.tag=${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
