@@ -1,4 +1,4 @@
-name: build+push
+name: Build and push ingress-nginx images
 
 on:
   workflow_dispatch:
