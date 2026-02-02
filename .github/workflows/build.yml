@@ -1,6 +1,8 @@
 name: Build and push ingress-nginx images
 
 on:
+  schedule:
+    - cron: '0 3 * * 2'
   workflow_dispatch:
     inputs:
       fork_repo:
