@@ -1,3 +1,7 @@
+[![Manual Builds](https://github.com/porter-dev/ingress-nginx/actions/workflows/build.yml/badge.svg?event=workflow_dispatch)](https://github.com/porter-dev/ingress-nginx/actions/workflows/build.yml)
+
+[![Weekly Builds](https://github.com/porter-dev/ingress-nginx/actions/workflows/build.yml/badge.svg?event=schedule)](https://github.com/porter-dev/ingress-nginx/actions/workflows/build.yml)
+
 # ingress-nginx
 A repo for building Chainguard's fork of [ingress-nginx](https://github.com/chainguard-forks/ingress-nginx).
 
