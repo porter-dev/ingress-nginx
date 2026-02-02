@@ -19,18 +19,26 @@ controller:
     digest: null
 ```
 
+## Helm charts
+
+We've elected to also operate our own mirror for the Helm charts itself. To make things simpler, we've pushed these charts as OCI images to [Docker Hub](https://hub.docker.com/r/porterhub/ingress-nginx). To use these images, all you need to do is point your `helm install` / `helm upgrade` commands at `oci://registry-1.docker.io/porterhub/ingress-nginx`:
+
+```bash
+helm upgrade --install ingress-nginx oci://registry-1.docker.io/porterhub/ingress-nginx -n ingress-nginx --version "4.12.1" -f ./ingress-nginx-values.yaml
+```
+
 ## Supported versions
 
 We currently build the following versions:
 
-| Helm Chart Version | Controller Image Tag | Image Repository |
-|--------------------|---------------------|------------------|
-| 4.11.5             | v1.11.5             | porterhub/controller |
-| 4.12.1             | v1.12.1             | porterhub/controller |
-| 4.12.8             | v1.12.8             | porterhub/controller |
-| 4.13.0             | v1.13.0             | porterhub/controller |
-| 4.13.4             | v1.13.4             | porterhub/controller |
-| 4.14.0             | v1.14.0             | porterhub/controller |
+| Helm Chart Version | Controller Image Tag | Image Repository | Chart Repository |
+|--------------------|---------------------|------------------|------------------|
+| 4.11.5             | v1.11.5             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.12.1             | v1.12.1             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.12.8             | v1.12.8             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.13.0             | v1.13.0             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.13.4             | v1.13.4             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.14.0             | v1.14.0             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
 
 ## Running a fresh build
 
