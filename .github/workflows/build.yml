@@ -100,7 +100,34 @@ jobs:
           echo "Pushing to: ${REGISTRY}"
           
           make release
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+      
+      - name: Log in to Docker Hub with Helm
+        run: |
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | helm registry login registry-1.docker.io \
+            --username ${{ secrets.DOCKERHUB_USERNAME }} \
+            --password-stdin
+      
+      - name: Package and push Helm chart
+        env:
+          CHART_VERSION: ${{ matrix.chart_version }}
+          DOCKER_ORG: ${{ env.DOCKER_ORG }}
+        run: |
+          # Navigate to the chart directory
+          cd charts/ingress-nginx
           
+          # Package the chart
+          helm package . --version ${CHART_VERSION}
+          
+          # Push to Docker Hub as OCI artifact
+          helm push ingress-nginx-${CHART_VERSION}.tgz oci://registry-1.docker.io/${DOCKER_ORG}
+          
+          echo "Pushed Helm chart to oci://registry-1.docker.io/${DOCKER_ORG}/ingress-nginx:${CHART_VERSION}"
+
       - name: Generate build summary
         run: |
           VERSION=${{ steps.meta.outputs.version }}
@@ -117,10 +144,12 @@ jobs:
           echo "- \`${REGISTRY}/controller:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${REGISTRY}/controller-chroot:${VERSION}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Packaged Charts" >> $GITHUB_STEP_SUMMARY
+          echo "- \`oci://registry-1.docker.io/${DOCKER_ORG}/ingress-nginx:${CHART_VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Helm Override Example" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "helm upgrade --install ingress-nginx ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --repo https://kubernetes.github.io/ingress-nginx \\" >> $GITHUB_STEP_SUMMARY
+          echo "helm upgrade --install oci://registry-1.docker.io/porterhub/ingress-nginx:VERSION \\" >> $GITHUB_STEP_SUMMARY
           echo "  --namespace ingress-nginx --create-namespace \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set controller.image.registry=docker.io \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set controller.image.image=${REGISTRY#*/}/controller \\" >> $GITHUB_STEP_SUMMARY
