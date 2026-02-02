@@ -27,6 +27,8 @@ We've elected to also operate our own mirror for the Helm charts itself. To make
 helm upgrade --install ingress-nginx oci://registry-1.docker.io/porterhub/ingress-nginx -n ingress-nginx --version "4.12.1" -f ./ingress-nginx-values.yaml
 ```
 
+Our build workflow is responsible for pushing updated OCI packages to Docker Hub every time new images are built.
+
 ## Supported versions
 
 We currently build the following versions:
