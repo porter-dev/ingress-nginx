@@ -45,6 +45,9 @@ We currently build the following versions:
 | 4.13.0             | v1.13.0             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
 | 4.13.4             | v1.13.4             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
 | 4.14.0             | v1.14.0             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.14.1             | v1.14.1             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.14.2             | v1.14.2             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.14.3             | v1.14.3             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
 
 ## Running a fresh build
 
