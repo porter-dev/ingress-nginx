@@ -132,8 +132,8 @@ jobs:
         run: |
           for IMAGE in controller controller-chroot; do
             docker buildx imagetools create \
-              --tag ${GHCR_PREFIX}/${IMAGE}:${TAG} \
-              ${DOCKERHUB_PREFIX}/${IMAGE}:${TAG}
+              --tag ${GHCR_PREFIX}/ingress-nginx-${IMAGE}:${TAG} \
+              ${{ env.DOCKER_ORG }}/${IMAGE}:${TAG}
           done
       
       - name: Install Helm
