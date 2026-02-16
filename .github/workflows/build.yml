@@ -13,12 +13,16 @@ on:
         description: 'Docker Hub organization/username (defaults to the DOCKERHUB_USERNAME secret)'
         required: false
         default: 'porterhub'
+      ghcr_org:
+        description: 'Github Container Registry organization/username (defaults to the GHCR_USERNAME secret)'
+        required: false
+        default: 'porter-dev'
 
 env:
   REGISTRY: docker.io
   GHCR_REGISTRY: ghcr.io
   DOCKER_ORG: ${{ github.event.inputs.docker_org || secrets.DOCKERHUB_USERNAME }}
-  GHCR_ORG: ${{ github.repository_owner }}
+  GHCR_ORG: ${{ github.event.inputs.ghcr_org || secrets.GHCR_USERNAME }} || ${{ github.repository_owner }}
   FORK_REPO: ${{ github.event.inputs.fork_repo || 'chainguard-forks/ingress-nginx' }}
 
 jobs:
