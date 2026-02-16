@@ -16,7 +16,9 @@ on:
 
 env:
   REGISTRY: docker.io
+  GHCR_REGISTRY: ghcr.io
   DOCKER_ORG: ${{ github.event.inputs.docker_org || secrets.DOCKERHUB_USERNAME }}
+  GHCR_ORG: ${{ github.repository_owner }}
   FORK_REPO: ${{ github.event.inputs.fork_repo || 'chainguard-forks/ingress-nginx' }}
 
 jobs:
@@ -73,6 +75,7 @@ jobs:
             upstream_chart_tag: 'helm-chart-4.14.3'
     permissions:
       contents: read
+      packages: write
       
     steps:
       - name: Checkout the fork repository
@@ -93,6 +96,13 @@ jobs:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Extract metadata
         id: meta
@@ -118,7 +128,7 @@ jobs:
       - name: Install mage
         run: go install github.com/magefile/mage@latest
         
-      - name: Build and push images
+      - name: Build and push images to Docker Hub
         env:
           TAG: ${{ steps.meta.outputs.version }}
           REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
@@ -127,6 +137,18 @@ jobs:
           echo "Pushing to: ${REGISTRY}"
           
           make release
+      
+      - name: Retag and push images to GHCR
+        env:
+          TAG: ${{ steps.meta.outputs.version }}
+          DOCKERHUB_PREFIX: ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKER_ORG }}
+          GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
+        run: |
+          for IMAGE in controller controller-chroot; do
+            docker buildx imagetools create \
+              --tag ${GHCR_PREFIX}/${IMAGE}:${TAG} \
+              ${DOCKERHUB_PREFIX}/${IMAGE}:${TAG}
+          done
       
       - name: Install Helm
         uses: azure/setup-helm@v4
