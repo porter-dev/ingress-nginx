@@ -29,7 +29,7 @@ Alternatively, you can point to GHCR:
 controller:
   image:
     registry: ghcr.io
-    image: porter-dev/ingress-nginx
+    image: porter-dev/ingress-nginx-controller
     tag: "v1.12.1"
     digest: null
 ```
