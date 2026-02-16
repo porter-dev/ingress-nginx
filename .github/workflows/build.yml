@@ -22,7 +22,7 @@ env:
   REGISTRY: docker.io
   GHCR_REGISTRY: ghcr.io
   DOCKER_ORG: ${{ github.event.inputs.docker_org || secrets.DOCKERHUB_USERNAME }}
-  GHCR_ORG: ${{ github.event.inputs.ghcr_org || secrets.GHCR_USERNAME }} || ${{ github.repository_owner }}
+  GHCR_ORG: ${{ github.event.inputs.ghcr_org || secrets.GHCR_USERNAME || github.repository_owner }}
   FORK_REPO: ${{ github.event.inputs.fork_repo || 'chainguard-forks/ingress-nginx' }}
 
 jobs:
