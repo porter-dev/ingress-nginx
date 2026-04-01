@@ -10,7 +10,7 @@ As you would no doubt be aware, `ingress-nginx` is being deprecated in March. Th
 
 ## Using these images
 
-We're currently hosting these built images at [porterhub/controller](https://hub.docker.com/r/porterhub/controller). Due to the way the Makefile for `ingress-nginx` functions, we're stuck with using `controller` as the repo name on Docker Hub, since the Makefile typically expects the owner name to be `ingress-nginx`. This isn't something I'm interested in tweaking atm. The [build process](./.github/workflows/build.yml) pulls in [Chainguard's fork of `ingress-nginx`](https://github.com/chainguard-forks/ingress-nginx), and builds off the `helm-chart-4.12.1` tag and builds multi-arch images. More up-to-date tags will be added gradually.
+We're currently hosting these built images at [ghcr.io/porter-dev/ingress-nginx-controller](https://hub.docker.com/r/ghcr.io/porter-dev/ingress-nginx-controller). Due to the way the Makefile for `ingress-nginx` functions, we're stuck with using `controller` as the repo name on Docker Hub, since the Makefile typically expects the owner name to be `ingress-nginx`. This isn't something I'm interested in tweaking atm. The [build process](./.github/workflows/build.yml) pulls in [Chainguard's fork of `ingress-nginx`](https://github.com/chainguard-forks/ingress-nginx), and builds off the `helm-chart-4.12.1` tag and builds multi-arch images. More up-to-date tags will be added gradually.
 
 To reconfigure `ingress-nginx` on a customer's cluster to use this image, simply modify the default `controller.image` block so that it looks like this:
 
@@ -18,7 +18,7 @@ To reconfigure `ingress-nginx` on a customer's cluster to use this image, simply
 controller:
   image:
     registry: docker.io
-    image: porterhub/controller
+    image: ghcr.io/porter-dev/ingress-nginx-controller
     tag: "v1.12.1"
     digest: null
 ```
@@ -51,21 +51,25 @@ We currently build the following versions:
 
 | Helm Chart Version | Controller Image Tag | Image Repository | Chart Repository | Status |
 |--------------------|---------------------|------------------|------------------|------------------|
-| 4.11.5             | v1.11.5             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.12.1             | v1.12.1             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.12.8             | v1.12.8             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.0             | v1.13.0             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.1             | v1.13.1             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.2             | v1.13.2             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.3             | v1.13.3             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.4             | v1.13.4             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.5             | v1.13.5             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.13.6             | v1.13.6             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.13.7             | v1.13.7             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.14.0             | v1.14.0             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.14.1             | v1.14.1             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.14.2             | v1.14.2             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.14.3             | v1.14.3             | porterhub/controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
+| 4.11.5             | v1.11.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.12.1             | v1.12.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.12.8             | v1.12.8             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.13.0             | v1.13.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.13.1             | v1.13.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.13.2             | v1.13.2             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.13.3             | v1.13.3             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.13.4             | v1.13.4             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.13.5             | v1.13.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
+| 4.13.6             | v1.13.6             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
+| 4.13.7             | v1.13.7             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
+| 4.14.0             | v1.14.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.14.1             | v1.14.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| 4.14.2             | v1.14.2             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| 4.14.3             | v1.14.3             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| 4.14.4             | v1.14.4             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| 4.14.5             | v1.14.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| 4.15.0             | v1.15.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| 4.15.1             | v1.15.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
 
 Here, the status field refers to which tags are actually available in the Chainguard repo(and hence are being pulled over here for builds).
 
