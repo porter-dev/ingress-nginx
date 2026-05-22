@@ -154,10 +154,24 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'GOLANG_VERSION'
-          
+
       - name: Install mage
         run: go install github.com/magefile/mage@latest
-        
+
+      - name: Pre-pull build images via mirror.gcr.io
+        run: |
+          set -euo pipefail
+          GO_VER=$(cat GOLANG_VERSION)
+          ALPINE_TAG=$(grep -oE 'golang:\$\(GO_VERSION\)-alpine[0-9]+\.[0-9]+' Makefile | head -1 | sed 's/.*-alpine/alpine/')
+          if [ -z "${ALPINE_TAG}" ]; then
+            ALPINE_TAG="alpine3.22"
+          fi
+          IMAGE="golang:${GO_VER}-${ALPINE_TAG}"
+          echo "Pre-pulling ${IMAGE} from mirror.gcr.io to avoid Docker Hub rate limits..."
+          docker pull "mirror.gcr.io/library/${IMAGE}"
+          docker tag "mirror.gcr.io/library/${IMAGE}" "${IMAGE}"
+          docker tag "mirror.gcr.io/library/${IMAGE}" "docker.io/library/${IMAGE}"
+
       - name: Build and push images to Docker Hub
         env:
           TAG: ${{ steps.meta.outputs.version }}
