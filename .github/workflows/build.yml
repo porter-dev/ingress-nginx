@@ -31,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - app_version: '1.11.5'
@@ -146,25 +147,27 @@ jobs:
           
           make release
       
-      - name: Retag and push images to GHCR
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Mirror images to GHCR
         env:
           TAG: ${{ steps.meta.outputs.version }}
-          DOCKERHUB_PREFIX: ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKER_ORG }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
           set -euo pipefail
           for IMAGE in controller controller-chroot; do
-            SRC="${{ env.DOCKER_ORG }}/${IMAGE}:${TAG}"
+            SRC="docker.io/${{ env.DOCKER_ORG }}/${IMAGE}:${TAG}"
             DST="${GHCR_PREFIX}/ingress-nginx-${IMAGE}:${TAG}"
             for attempt in 1 2 3 4 5; do
-              if docker buildx imagetools create --tag "${DST}" "${SRC}"; then
+              if crane copy "${SRC}" "${DST}"; then
                 break
               fi
               if [ "${attempt}" -eq 5 ]; then
                 echo "Mirror to GHCR failed after ${attempt} attempts" >&2
                 exit 1
               fi
-              sleep_for=$((30 * attempt))
+              sleep_for=$((60 * attempt))
               echo "Attempt ${attempt} failed (likely Docker Hub 429); retrying in ${sleep_for}s..." >&2
               sleep "${sleep_for}"
             done
