@@ -91,6 +91,15 @@ jobs:
           - app_version: '1.15.5'
             chart_version: '4.15.5'
             upstream_chart_tag: 'helm-chart-4.15.5'
+          - app_version: '1.15.6'
+            chart_version: '4.15.6'
+            upstream_chart_tag: 'helm-chart-4.15.6'
+          - app_version: '1.15.7'
+            chart_version: '4.15.7'
+            upstream_chart_tag: 'helm-chart-4.15.7'
+          - app_version: '1.15.8'
+            chart_version: '4.15.8'
+            upstream_chart_tag: 'helm-chart-4.15.8'
     permissions:
       contents: read
       packages: write
