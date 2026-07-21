@@ -31,9 +31,26 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       base_matrix: ${{ steps.resolve.outputs.base_matrix }}
+      tag_suffix: ${{ steps.suffix.outputs.tag_suffix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Compute image tag suffix
+        id: suffix
+        env:
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          if [ "$BRANCH" = "$DEFAULT_BRANCH" ]; then
+            echo "Running on default branch ($BRANCH); images keep their normal tags."
+            echo "tag_suffix=" >> "$GITHUB_OUTPUT"
+          else
+            sanitized=$(printf '%s' "$BRANCH" | sed 's#[^a-zA-Z0-9]#-#g; s#^-*##; s#-*$##')
+            echo "Branch build ($BRANCH); suffixing every image tag with -${sanitized}"
+            echo "tag_suffix=-${sanitized}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Resolve deduped base image matrix
         id: resolve
@@ -110,25 +127,28 @@ jobs:
       - name: Build and push nginx base image to Docker Hub
         env:
           REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          BASE_TAG: ${{ matrix.base_tag }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
         run: |
-          echo "Building nginx base image ${{ matrix.base_tag }} from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
+          echo "Building nginx base image ${BASE_TAG}${TAG_SUFFIX} from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
           cd images/nginx
-          make push REGISTRY=${REGISTRY}
+          make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX}
 
       - name: Mirror nginx base image to GHCR
         env:
           BASE_TAG: ${{ matrix.base_tag }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
           DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
           docker buildx imagetools create \
-            --tag ${GHCR_PREFIX}/ingress-nginx-nginx:${BASE_TAG} \
-            ${DOCKERHUB_PREFIX}/nginx:${BASE_TAG}
+            --tag ${GHCR_PREFIX}/ingress-nginx-nginx:${BASE_TAG}${TAG_SUFFIX} \
+            ${DOCKERHUB_PREFIX}/nginx:${BASE_TAG}${TAG_SUFFIX}
 
   build-and-push:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
     runs-on: ubicloud-standard-4
-    needs: build-base
+    needs: [prepare, build-base]
     strategy:
       matrix:
         include:
@@ -237,19 +257,20 @@ jobs:
         
       - name: Build and push images to Docker Hub
         env:
-          TAG: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
           REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
         run: |
-          BASE_TAG=$(cat images/nginx/TAG)
+          BASE_TAG=$(cat images/nginx/TAG)${TAG_SUFFIX}
           echo "Building from fork: ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
-          echo "Pushing to: ${REGISTRY}"
+          echo "Pushing to: ${REGISTRY} (tag ${TAG})"
           echo "Using rebuilt base image: ${REGISTRY}/nginx:${BASE_TAG}"
 
           make release BASE_IMAGE=${REGISTRY}/nginx:${BASE_TAG}
-      
+
       - name: Retag and push images to GHCR
         env:
-          TAG: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
           DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
@@ -278,7 +299,7 @@ jobs:
 
       - name: Package and push Helm chart to Docker Hub and GHCR
         env:
-          CHART_VERSION: ${{ matrix.chart_version }}
+          CHART_VERSION: ${{ matrix.chart_version }}${{ needs.prepare.outputs.tag_suffix }}
           DOCKER_ORG: ${{ env.DOCKER_ORG }}
           GHCR_ORG: ${{ env.GHCR_ORG }}
           GHCR_REGISTRY: ${{ env.GHCR_REGISTRY }}
@@ -300,7 +321,7 @@ jobs:
 
       - name: Generate build summary
         run: |
-          VERSION=${{ steps.meta.outputs.version }}
+          VERSION=${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
           REGISTRY=${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
