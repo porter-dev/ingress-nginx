@@ -148,13 +148,13 @@ jobs:
       - name: Retag and push images to GHCR
         env:
           TAG: ${{ steps.meta.outputs.version }}
-          DOCKERHUB_PREFIX: ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKER_ORG }}
+          DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
           for IMAGE in controller controller-chroot; do
             docker buildx imagetools create \
               --tag ${GHCR_PREFIX}/ingress-nginx-${IMAGE}:${TAG} \
-              ${{ env.DOCKER_ORG }}/${IMAGE}:${TAG}
+              ${DOCKERHUB_PREFIX}/${IMAGE}:${TAG}
           done
       
       - name: Install Helm
@@ -167,22 +167,34 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | helm registry login registry-1.docker.io \
             --username ${{ secrets.DOCKERHUB_USERNAME }} \
             --password-stdin
-      
-      - name: Package and push Helm chart
+
+      - name: Log in to GHCR with Helm
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.GHCR_REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password-stdin
+
+      - name: Package and push Helm chart to Docker Hub and GHCR
         env:
           CHART_VERSION: ${{ matrix.chart_version }}
           DOCKER_ORG: ${{ env.DOCKER_ORG }}
+          GHCR_ORG: ${{ env.GHCR_ORG }}
+          GHCR_REGISTRY: ${{ env.GHCR_REGISTRY }}
         run: |
           # Navigate to the chart directory
           cd charts/ingress-nginx
-          
+
           # Package the chart
           helm package . --version ${CHART_VERSION}
-          
+
           # Push to Docker Hub as OCI artifact
           helm push ingress-nginx-${CHART_VERSION}.tgz oci://registry-1.docker.io/${DOCKER_ORG}
-          
+
+          # Push to GHCR as OCI artifact
+          helm push ingress-nginx-${CHART_VERSION}.tgz oci://${GHCR_REGISTRY}/${GHCR_ORG}
+
           echo "Pushed Helm chart to oci://registry-1.docker.io/${DOCKER_ORG}/ingress-nginx:${CHART_VERSION}"
+          echo "Pushed Helm chart to oci://${GHCR_REGISTRY}/${GHCR_ORG}/ingress-nginx:${CHART_VERSION}"
 
       - name: Generate build summary
         run: |
