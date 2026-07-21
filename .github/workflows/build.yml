@@ -26,9 +26,109 @@ env:
   FORK_REPO: ${{ github.event.inputs.fork_repo || 'chainguard-forks/ingress-nginx' }}
 
 jobs:
+  prepare:
+    name: "Resolve nginx base image matrix"
+    runs-on: ubuntu-latest
+    outputs:
+      base_matrix: ${{ steps.resolve.outputs.base_matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve deduped base image matrix
+        id: resolve
+        env:
+          FORK_REPO: ${{ env.FORK_REPO }}
+        run: |
+          set -euo pipefail
+
+          # Ensure yq (mikefarah) is available.
+          if ! command -v yq >/dev/null 2>&1; then
+            sudo curl -fsSL -o /usr/local/bin/yq \
+              https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
+
+          # The controller matrix in this workflow is the single source of truth
+          # for supported versions. For each branch, read images/nginx/TAG from
+          # the fork and dedupe by base tag, keeping the first branch that
+          # references each base as the one to build it from.
+          declare -A seen
+          items='[]'
+          while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${ref}/images/nginx/TAG" | tr -d '[:space:]')
+            if [ -z "${seen[$base_tag]:-}" ]; then
+              seen[$base_tag]=1
+              items=$(jq -c --arg bt "$base_tag" --arg ref "$ref" \
+                '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$items")
+            fi
+          done < <(yq '.jobs.build-and-push.strategy.matrix.include[].upstream_chart_tag' .github/workflows/build.yml)
+
+          echo "Resolved base image matrix:"
+          jq . <<<"$items"
+          echo "base_matrix={\"include\":${items}}" >> "$GITHUB_OUTPUT"
+
+  build-base:
+    name: "Build nginx base image ${{ matrix.base_tag }}"
+    runs-on: ubicloud-standard-4
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.base_matrix) }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout the fork repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FORK_REPO }}
+          ref: ${{ matrix.upstream_chart_tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push nginx base image to Docker Hub
+        env:
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+        run: |
+          echo "Building nginx base image ${{ matrix.base_tag }} from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
+          cd images/nginx
+          make push REGISTRY=${REGISTRY}
+
+      - name: Mirror nginx base image to GHCR
+        env:
+          BASE_TAG: ${{ matrix.base_tag }}
+          DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
+        run: |
+          docker buildx imagetools create \
+            --tag ${GHCR_PREFIX}/ingress-nginx-nginx:${BASE_TAG} \
+            ${DOCKERHUB_PREFIX}/nginx:${BASE_TAG}
+
   build-and-push:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
     runs-on: ubicloud-standard-4
+    needs: build-base
     strategy:
       matrix:
         include:
@@ -140,10 +240,12 @@ jobs:
           TAG: ${{ steps.meta.outputs.version }}
           REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
         run: |
+          BASE_TAG=$(cat images/nginx/TAG)
           echo "Building from fork: ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
           echo "Pushing to: ${REGISTRY}"
-          
-          make release
+          echo "Using rebuilt base image: ${REGISTRY}/nginx:${BASE_TAG}"
+
+          make release BASE_IMAGE=${REGISTRY}/nginx:${BASE_TAG}
       
       - name: Retag and push images to GHCR
         env:
