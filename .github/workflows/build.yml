@@ -184,10 +184,16 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        # Only the three latest chart versions are built. The prepare job derives
-        # the nginx base-image matrix from this list, so trimming here trims the
-        # base builds too.
+        # Curated set of chart versions to build. The prepare job derives the
+        # nginx base-image matrix from this list, so editing here also adjusts
+        # which base images get built.
         include:
+          - app_version: '1.12.1'
+            chart_version: '4.12.1'
+            upstream_chart_tag: 'helm-chart-4.12.1'
+          - app_version: '1.14.0'
+            chart_version: '4.14.0'
+            upstream_chart_tag: 'helm-chart-4.14.0'
           - app_version: '1.15.0'
             chart_version: '4.15.0'
             upstream_chart_tag: 'helm-chart-4.15.0'
