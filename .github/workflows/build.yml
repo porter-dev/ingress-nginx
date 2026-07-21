@@ -147,14 +147,19 @@ jobs:
 
   build-and-push:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
-    runs-on: ubicloud-standard-4
+    runs-on: ubuntu-latest
     needs: [prepare, build-base]
     strategy:
+      fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - app_version: '1.11.5'
             chart_version: '4.11.5'
             upstream_chart_tag: 'helm-chart-4.11.5'
+          - app_version: '1.11.8'
+            chart_version: '4.11.8'
+            upstream_chart_tag: 'helm-chart-4.11.8'
           - app_version: '1.12.1'
             chart_version: '4.12.1'
             upstream_chart_tag: 'helm-chart-4.12.1'
@@ -176,6 +181,9 @@ jobs:
           - app_version: '1.13.4'
             chart_version: '4.13.4'
             upstream_chart_tag: 'helm-chart-4.13.4'
+          - app_version: '1.13.9'
+            chart_version: '4.13.9'
+            upstream_chart_tag: 'helm-chart-4.13.9'
           - app_version: '1.14.0'
             chart_version: '4.14.0'
             upstream_chart_tag: 'helm-chart-4.14.0'
@@ -200,6 +208,9 @@ jobs:
           - app_version: '1.15.1'
             chart_version: '4.15.1'
             upstream_chart_tag: 'helm-chart-4.15.1'
+          - app_version: '1.15.5'
+            chart_version: '4.15.5'
+            upstream_chart_tag: 'helm-chart-4.15.5'
     permissions:
       contents: read
       packages: write
@@ -210,12 +221,24 @@ jobs:
         with:
           repository: ${{ env.FORK_REPO }}
           ref: ${{ matrix.upstream_chart_tag }}
-        
+
+      - name: Configure Docker registry mirror
+        run: |
+          sudo mkdir -p /etc/docker
+          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-        
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+          config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
         
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -251,10 +274,24 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'GOLANG_VERSION'
-          
+
       - name: Install mage
         run: go install github.com/magefile/mage@latest
-        
+
+      - name: Pre-pull build images via mirror.gcr.io
+        run: |
+          set -euo pipefail
+          GO_VER=$(cat GOLANG_VERSION)
+          ALPINE_TAG=$(grep -oE 'golang:\$\(GO_VERSION\)-alpine[0-9]+\.[0-9]+' Makefile | head -1 | sed 's/.*-alpine/alpine/')
+          if [ -z "${ALPINE_TAG}" ]; then
+            ALPINE_TAG="alpine3.22"
+          fi
+          IMAGE="golang:${GO_VER}-${ALPINE_TAG}"
+          echo "Pre-pulling ${IMAGE} from mirror.gcr.io to avoid Docker Hub rate limits..."
+          docker pull "mirror.gcr.io/library/${IMAGE}"
+          docker tag "mirror.gcr.io/library/${IMAGE}" "${IMAGE}"
+          docker tag "mirror.gcr.io/library/${IMAGE}" "docker.io/library/${IMAGE}"
+
       - name: Build and push images to Docker Hub
         env:
           TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
@@ -268,16 +305,30 @@ jobs:
 
           make release BASE_IMAGE=${REGISTRY}/nginx:${BASE_TAG}
 
-      - name: Retag and push images to GHCR
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Mirror images to GHCR
         env:
           TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
-          DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
+          set -euo pipefail
           for IMAGE in controller controller-chroot; do
-            docker buildx imagetools create \
-              --tag ${GHCR_PREFIX}/ingress-nginx-${IMAGE}:${TAG} \
-              ${DOCKERHUB_PREFIX}/${IMAGE}:${TAG}
+            SRC="docker.io/${{ env.DOCKER_ORG }}/${IMAGE}:${TAG}"
+            DST="${GHCR_PREFIX}/ingress-nginx-${IMAGE}:${TAG}"
+            for attempt in 1 2 3 4 5; do
+              if crane copy "${SRC}" "${DST}"; then
+                break
+              fi
+              if [ "${attempt}" -eq 5 ]; then
+                echo "Mirror to GHCR failed after ${attempt} attempts" >&2
+                exit 1
+              fi
+              sleep_for=$((60 * attempt))
+              echo "Attempt ${attempt} failed (likely Docker Hub 429); retrying in ${sleep_for}s..." >&2
+              sleep "${sleep_for}"
+            done
           done
       
       - name: Install Helm
