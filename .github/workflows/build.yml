@@ -24,6 +24,11 @@ env:
   DOCKER_ORG: ${{ github.event.inputs.docker_org || secrets.DOCKERHUB_USERNAME }}
   GHCR_ORG: ${{ github.event.inputs.ghcr_org || secrets.GHCR_USERNAME || github.repository_owner }}
   FORK_REPO: ${{ github.event.inputs.fork_repo || 'chainguard-forks/ingress-nginx' }}
+  # Platforms to build. 32-bit linux/arm/v7 is intentionally excluded: it is
+  # irrelevant for cloud Kubernetes nodes and its base build breaks under QEMU
+  # emulation (git EFAULT during the ModSecurity clone).
+  BUILD_PLATFORMS: linux/amd64,linux/arm64
+  GO_PLATFORMS: amd64 arm64
 
 jobs:
   prepare:
@@ -144,7 +149,7 @@ jobs:
         run: |
           echo "Building nginx base image ${BASE_TAG}${TAG_SUFFIX} from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
           cd images/nginx
-          make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX}
+          make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX} PLATFORMS=${{ env.BUILD_PLATFORMS }}
 
       - name: Install crane
         uses: imjasonh/setup-crane@v0.4
@@ -329,7 +334,8 @@ jobs:
           echo "Pushing to: ${REGISTRY} (tag ${TAG})"
           echo "Using rebuilt base image: ${REGISTRY}/nginx:${BASE_TAG}"
 
-          make release BASE_IMAGE=${REGISTRY}/nginx:${BASE_TAG}
+          make release BASE_IMAGE=${REGISTRY}/nginx:${BASE_TAG} \
+            PLATFORMS="${{ env.GO_PLATFORMS }}" BUILDX_PLATFORMS=${{ env.BUILD_PLATFORMS }}
 
       - name: Install crane
         uses: imjasonh/setup-crane@v0.4
