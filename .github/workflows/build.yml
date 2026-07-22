@@ -33,7 +33,7 @@ env:
 jobs:
   prepare:
     name: "Resolve nginx base image matrix"
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubicloud-standard-2
     outputs:
       base_matrix: ${{ steps.resolve.outputs.base_matrix }}
       base_build_matrix: ${{ steps.resolve.outputs.base_build_matrix }}
@@ -101,7 +101,7 @@ jobs:
   build-base:
     name: "Build nginx base ${{ matrix.base_tag }} (${{ matrix.arch }})"
     # Each arch builds on its own native runner, so nothing runs under QEMU.
-    runs-on: ${{ matrix.arch == 'arm64' && 'warp-ubuntu-latest-arm64-16x' || 'warp-ubuntu-latest-x64-16x' }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubicloud-standard-16-arm' || 'ubicloud-standard-16' }}
     needs: prepare
     strategy:
       fail-fast: false
@@ -152,7 +152,7 @@ jobs:
 
   merge-base:
     name: "Merge nginx base manifest ${{ matrix.base_tag }}"
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubicloud-standard-2
     needs: [prepare, build-base]
     strategy:
       fail-fast: false
@@ -202,7 +202,7 @@ jobs:
 
   build-and-push:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
-    runs-on: warp-ubuntu-latest-x64-8x
+    runs-on: ubicloud-standard-8
     needs: [prepare, merge-base]
     strategy:
       fail-fast: false
