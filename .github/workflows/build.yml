@@ -86,7 +86,7 @@ jobs:
               items=$(jq -c --arg bt "$base_tag" --arg ref "$ref" \
                 '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$items")
             fi
-          done < <(yq '.jobs.build-and-push.strategy.matrix.include[].upstream_chart_tag' .github/workflows/build.yml)
+          done < <(yq '.jobs.build-ingress-nginx.strategy.matrix.include[].upstream_chart_tag' .github/workflows/build.yml)
 
           # Fan each base out into one native per-arch build (amd64 + arm64).
           build_items=$(jq -c '[ .[] | . as $b | ("amd64","arm64") | $b + {arch: .} ]' <<<"$items")
@@ -98,7 +98,7 @@ jobs:
           echo "base_matrix={\"include\":${items}}" >> "$GITHUB_OUTPUT"
           echo "base_build_matrix={\"include\":${build_items}}" >> "$GITHUB_OUTPUT"
 
-  build-base:
+  build-nginx-base:
     name: "Build nginx base ${{ matrix.base_tag }} (${{ matrix.arch }})"
     # Each arch builds on its own native runner, so nothing runs under QEMU.
     runs-on: ${{ matrix.arch == 'arm64' && 'ubicloud-standard-16-arm' || 'ubicloud-standard-16' }}
@@ -150,10 +150,10 @@ jobs:
           cd images/nginx
           make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX}-${ARCH} PLATFORMS=linux/${ARCH}
 
-  merge-base:
+  merge-nginx-base:
     name: "Merge nginx base manifest ${{ matrix.base_tag }}"
     runs-on: ubicloud-standard-2
-    needs: [prepare, build-base]
+    needs: [prepare, build-nginx-base]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare.outputs.base_matrix) }}
@@ -200,10 +200,10 @@ jobs:
           echo "Docker Hub base manifest:"
           docker buildx imagetools inspect "${DOCKERHUB_PREFIX}/nginx:${TAG}"
 
-  build-and-push:
+  build-ingress-nginx:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
     runs-on: ubicloud-standard-8
-    needs: [prepare, merge-base]
+    needs: [prepare, merge-nginx-base]
     strategy:
       fail-fast: false
       max-parallel: 4
