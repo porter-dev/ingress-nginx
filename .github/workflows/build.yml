@@ -308,22 +308,31 @@ jobs:
           docker tag "mirror.gcr.io/library/${IMAGE}" "${IMAGE}"
           docker tag "mirror.gcr.io/library/${IMAGE}" "docker.io/library/${IMAGE}"
 
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
       - name: Build and push images to Docker Hub
         env:
           TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
           REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
         run: |
+          set -euo pipefail
           BASE_TAG=$(cat images/nginx/TAG)${TAG_SUFFIX}
+          BASE_REF="${REGISTRY}/nginx:${BASE_TAG}"
+          # Pin FROM to the exact digest of the base we just built and merged.
+          # crane queries the registry directly (bypassing the docker mirror), and
+          # a digest pin makes the pull content-addressed: immune to tag mutation
+          # or pull-through-cache staleness. This is what guarantees the controller
+          # layers on the freshly rebuilt base, never a stale cached one.
+          BASE_DIGEST=$(crane digest "${BASE_REF}")
+          BASE_IMAGE="${REGISTRY}/nginx@${BASE_DIGEST}"
           echo "Building from fork: ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
           echo "Pushing to: ${REGISTRY} (tag ${TAG})"
-          echo "Using rebuilt base image: ${REGISTRY}/nginx:${BASE_TAG}"
+          echo "Pinned base image: ${BASE_IMAGE} (resolved from ${BASE_REF})"
 
-          make release BASE_IMAGE=${REGISTRY}/nginx:${BASE_TAG} \
+          make release BASE_IMAGE=${BASE_IMAGE} \
             PLATFORMS="${{ env.GO_PLATFORMS }}" BUILDX_PLATFORMS=${{ env.BUILD_PLATFORMS }}
-
-      - name: Install crane
-        uses: imjasonh/setup-crane@v0.4
 
       - name: Mirror images to GHCR
         env:
