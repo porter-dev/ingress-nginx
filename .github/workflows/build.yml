@@ -33,9 +33,10 @@ env:
 jobs:
   prepare:
     name: "Resolve nginx base image matrix"
-    runs-on: ubicloud-standard-4
+    runs-on: warp-ubuntu-latest-x64-2x
     outputs:
       base_matrix: ${{ steps.resolve.outputs.base_matrix }}
+      base_build_matrix: ${{ steps.resolve.outputs.base_build_matrix }}
       tag_suffix: ${{ steps.suffix.outputs.tag_suffix }}
     steps:
       - name: Checkout
@@ -87,17 +88,24 @@ jobs:
             fi
           done < <(yq '.jobs.build-and-push.strategy.matrix.include[].upstream_chart_tag' .github/workflows/build.yml)
 
-          echo "Resolved base image matrix:"
+          # Fan each base out into one native per-arch build (amd64 + arm64).
+          build_items=$(jq -c '[ .[] | . as $b | ("amd64","arm64") | $b + {arch: .} ]' <<<"$items")
+
+          echo "Resolved base image matrix (merge):"
           jq . <<<"$items"
+          echo "Resolved per-arch base build matrix:"
+          jq . <<<"$build_items"
           echo "base_matrix={\"include\":${items}}" >> "$GITHUB_OUTPUT"
+          echo "base_build_matrix={\"include\":${build_items}}" >> "$GITHUB_OUTPUT"
 
   build-base:
-    name: "Build nginx base image ${{ matrix.base_tag }}"
-    runs-on: ubicloud-standard-30
+    name: "Build nginx base ${{ matrix.base_tag }} (${{ matrix.arch }})"
+    # Each arch builds on its own native runner, so nothing runs under QEMU.
+    runs-on: ${{ matrix.arch == 'arm64' && 'warp-ubuntu-latest-arm64-16x' || 'warp-ubuntu-latest-x64-16x' }}
     needs: prepare
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.prepare.outputs.base_matrix) }}
+      matrix: ${{ fromJson(needs.prepare.outputs.base_build_matrix) }}
     permissions:
       contents: read
       packages: write
@@ -115,9 +123,6 @@ jobs:
           echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -134,6 +139,39 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
+      - name: Build and push ${{ matrix.arch }} nginx base image (native)
+        env:
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          BASE_TAG: ${{ matrix.base_tag }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          echo "Building ${ARCH} nginx base ${BASE_TAG}${TAG_SUFFIX} natively from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
+          cd images/nginx
+          make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX}-${ARCH} PLATFORMS=linux/${ARCH}
+
+  merge-base:
+    name: "Merge nginx base manifest ${{ matrix.base_tag }}"
+    runs-on: warp-ubuntu-latest-x64-2x
+    needs: [prepare, build-base]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.base_matrix) }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -141,45 +179,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push nginx base image to Docker Hub
-        env:
-          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
-          BASE_TAG: ${{ matrix.base_tag }}
-          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
-        run: |
-          echo "Building nginx base image ${BASE_TAG}${TAG_SUFFIX} from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
-          cd images/nginx
-          make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX} PLATFORMS=${{ env.BUILD_PLATFORMS }}
-
-      - name: Install crane
-        uses: imjasonh/setup-crane@v0.4
-
-      - name: Mirror nginx base image to GHCR
+      - name: Assemble multi-arch base manifests
         env:
           BASE_TAG: ${{ matrix.base_tag }}
           TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+          DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
           set -euo pipefail
-          SRC="docker.io/${{ env.DOCKER_ORG }}/nginx:${BASE_TAG}${TAG_SUFFIX}"
-          DST="${GHCR_PREFIX}/ingress-nginx-nginx:${BASE_TAG}${TAG_SUFFIX}"
-          for attempt in 1 2 3 4 5; do
-            if crane copy "${SRC}" "${DST}"; then
-              break
-            fi
-            if [ "${attempt}" -eq 5 ]; then
-              echo "Mirror to GHCR failed after ${attempt} attempts" >&2
-              exit 1
-            fi
-            sleep_for=$((60 * attempt))
-            echo "Attempt ${attempt} failed (likely Docker Hub 429); retrying in ${sleep_for}s..." >&2
-            sleep "${sleep_for}"
-          done
+          TAG="${BASE_TAG}${TAG_SUFFIX}"
+          AMD64="${DOCKERHUB_PREFIX}/nginx:${TAG}-amd64"
+          ARM64="${DOCKERHUB_PREFIX}/nginx:${TAG}-arm64"
+
+          echo "Combining ${AMD64} + ${ARM64} into multi-arch manifests"
+          # Final base manifest on Docker Hub (consumed by the controller build).
+          docker buildx imagetools create -t "${DOCKERHUB_PREFIX}/nginx:${TAG}" "${AMD64}" "${ARM64}"
+          # Mirror the same manifest to GHCR.
+          docker buildx imagetools create -t "${GHCR_PREFIX}/ingress-nginx-nginx:${TAG}" "${AMD64}" "${ARM64}"
+
+          echo "Docker Hub base manifest:"
+          docker buildx imagetools inspect "${DOCKERHUB_PREFIX}/nginx:${TAG}"
 
   build-and-push:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
-    runs-on: ubicloud-standard-4
-    needs: [prepare, build-base]
+    runs-on: warp-ubuntu-latest-x64-8x
+    needs: [prepare, merge-base]
     strategy:
       fail-fast: false
       max-parallel: 4
