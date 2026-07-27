@@ -24,64 +24,200 @@ env:
   DOCKER_ORG: ${{ github.event.inputs.docker_org || secrets.DOCKERHUB_USERNAME }}
   GHCR_ORG: ${{ github.event.inputs.ghcr_org || secrets.GHCR_USERNAME || github.repository_owner }}
   FORK_REPO: ${{ github.event.inputs.fork_repo || 'chainguard-forks/ingress-nginx' }}
+  # Platforms to build. 32-bit linux/arm/v7 is intentionally excluded: it is
+  # irrelevant for cloud Kubernetes nodes and its base build breaks under QEMU
+  # emulation (git EFAULT during the ModSecurity clone).
+  BUILD_PLATFORMS: linux/amd64,linux/arm64
+  GO_PLATFORMS: amd64 arm64
 
 jobs:
-  build-and-push:
+  prepare:
+    name: "Resolve nginx base image matrix"
+    runs-on: ubicloud-standard-2
+    outputs:
+      base_matrix: ${{ steps.resolve.outputs.base_matrix }}
+      base_build_matrix: ${{ steps.resolve.outputs.base_build_matrix }}
+      tag_suffix: ${{ steps.suffix.outputs.tag_suffix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute image tag suffix
+        id: suffix
+        env:
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          if [ "$BRANCH" = "$DEFAULT_BRANCH" ]; then
+            echo "Running on default branch ($BRANCH); images keep their normal tags."
+            echo "tag_suffix=" >> "$GITHUB_OUTPUT"
+          else
+            sanitized=$(printf '%s' "$BRANCH" | sed 's#[^a-zA-Z0-9]#-#g; s#^-*##; s#-*$##')
+            echo "Branch build ($BRANCH); suffixing every image tag with -${sanitized}"
+            echo "tag_suffix=-${sanitized}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve deduped base image matrix
+        id: resolve
+        env:
+          FORK_REPO: ${{ env.FORK_REPO }}
+        run: |
+          set -euo pipefail
+
+          # Ensure yq (mikefarah) is available.
+          if ! command -v yq >/dev/null 2>&1; then
+            sudo curl -fsSL -o /usr/local/bin/yq \
+              https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
+
+          # The controller matrix in this workflow is the single source of truth
+          # for supported versions. For each branch, read images/nginx/TAG from
+          # the fork and dedupe by base tag, keeping the first branch that
+          # references each base as the one to build it from.
+          declare -A seen
+          items='[]'
+          while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${ref}/images/nginx/TAG" | tr -d '[:space:]')
+            if [ -z "${seen[$base_tag]:-}" ]; then
+              seen[$base_tag]=1
+              items=$(jq -c --arg bt "$base_tag" --arg ref "$ref" \
+                '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$items")
+            fi
+          done < <(yq '.jobs.build-ingress-nginx.strategy.matrix.include[].upstream_chart_tag' .github/workflows/build.yml)
+
+          # Fan each base out into one native per-arch build (amd64 + arm64).
+          build_items=$(jq -c '[ .[] | . as $b | ("amd64","arm64") | $b + {arch: .} ]' <<<"$items")
+
+          echo "Resolved base image matrix (merge):"
+          jq . <<<"$items"
+          echo "Resolved per-arch base build matrix:"
+          jq . <<<"$build_items"
+          echo "base_matrix={\"include\":${items}}" >> "$GITHUB_OUTPUT"
+          echo "base_build_matrix={\"include\":${build_items}}" >> "$GITHUB_OUTPUT"
+
+  build-nginx-base:
+    name: "Build nginx base ${{ matrix.base_tag }} (${{ matrix.arch }})"
+    # Each arch builds on its own native runner, so nothing runs under QEMU.
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubicloud-standard-16-arm' || 'ubicloud-standard-16' }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.base_build_matrix) }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout the fork repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FORK_REPO }}
+          ref: ${{ matrix.upstream_chart_tag }}
+
+      - name: Configure Docker registry mirror
+        run: |
+          sudo mkdir -p /etc/docker
+          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build and push ${{ matrix.arch }} nginx base image (native)
+        env:
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          BASE_TAG: ${{ matrix.base_tag }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          echo "Building ${ARCH} nginx base ${BASE_TAG}${TAG_SUFFIX} natively from ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
+          cd images/nginx
+          make push REGISTRY=${REGISTRY} TAG=${BASE_TAG}${TAG_SUFFIX}-${ARCH} PLATFORMS=linux/${ARCH}
+
+  merge-nginx-base:
+    name: "Merge nginx base manifest ${{ matrix.base_tag }}"
+    runs-on: ubicloud-standard-2
+    needs: [prepare, build-nginx-base]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.base_matrix) }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assemble multi-arch base manifests
+        env:
+          BASE_TAG: ${{ matrix.base_tag }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+          DOCKERHUB_PREFIX: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
+        run: |
+          set -euo pipefail
+          TAG="${BASE_TAG}${TAG_SUFFIX}"
+          AMD64="${DOCKERHUB_PREFIX}/nginx:${TAG}-amd64"
+          ARM64="${DOCKERHUB_PREFIX}/nginx:${TAG}-arm64"
+
+          echo "Combining ${AMD64} + ${ARM64} into multi-arch manifests"
+          # Final base manifest on Docker Hub (consumed by the controller build).
+          docker buildx imagetools create -t "${DOCKERHUB_PREFIX}/nginx:${TAG}" "${AMD64}" "${ARM64}"
+          # Mirror the same manifest to GHCR.
+          docker buildx imagetools create -t "${GHCR_PREFIX}/ingress-nginx-nginx:${TAG}" "${AMD64}" "${ARM64}"
+
+          echo "Docker Hub base manifest:"
+          docker buildx imagetools inspect "${DOCKERHUB_PREFIX}/nginx:${TAG}"
+
+  build-ingress-nginx:
     name: "Build chainguard/ingress-nginx@${{ matrix.app_version }} | ${{ matrix.chart_version }}"
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-8
+    needs: [prepare, merge-nginx-base]
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
+        # Curated set of chart versions to build. The prepare job derives the
+        # nginx base-image matrix from this list, so editing here also adjusts
+        # which base images get built.
         include:
-          - app_version: '1.11.5'
-            chart_version: '4.11.5'
-            upstream_chart_tag: 'helm-chart-4.11.5'
-          - app_version: '1.11.8'
-            chart_version: '4.11.8'
-            upstream_chart_tag: 'helm-chart-4.11.8'
           - app_version: '1.12.1'
             chart_version: '4.12.1'
             upstream_chart_tag: 'helm-chart-4.12.1'
-          - app_version: '1.12.8'
-            chart_version: '4.12.8'
-            upstream_chart_tag: 'helm-chart-4.12.8'
-          - app_version: '1.13.0'
-            chart_version: '4.13.0'
-            upstream_chart_tag: 'helm-chart-4.13.0'
-          - app_version: '1.13.1'
-            chart_version: '4.13.1'
-            upstream_chart_tag: 'helm-chart-4.13.1'
-          - app_version: '1.13.2'
-            chart_version: '4.13.2'
-            upstream_chart_tag: 'helm-chart-4.13.2'
-          - app_version: '1.13.3'
-            chart_version: '4.13.3'
-            upstream_chart_tag: 'helm-chart-4.13.3'
-          - app_version: '1.13.4'
-            chart_version: '4.13.4'
-            upstream_chart_tag: 'helm-chart-4.13.4'
-          - app_version: '1.13.9'
-            chart_version: '4.13.9'
-            upstream_chart_tag: 'helm-chart-4.13.9'
           - app_version: '1.14.0'
             chart_version: '4.14.0'
             upstream_chart_tag: 'helm-chart-4.14.0'
-          - app_version: '1.14.1'
-            chart_version: '4.14.1'
-            upstream_chart_tag: 'helm-chart-4.14.1'
-          - app_version: '1.14.2'
-            chart_version: '4.14.2'
-            upstream_chart_tag: 'helm-chart-4.14.2'
-          - app_version: '1.14.3'
-            chart_version: '4.14.3'
-            upstream_chart_tag: 'helm-chart-4.14.3'
-          - app_version: '1.14.4'
-            chart_version: '4.14.4'
-            upstream_chart_tag: 'helm-chart-4.14.4'
-          - app_version: '1.14.5'
-            chart_version: '4.14.5'
-            upstream_chart_tag: 'helm-chart-4.14.5'
           - app_version: '1.15.0'
             chart_version: '4.15.0'
             upstream_chart_tag: 'helm-chart-4.15.0'
@@ -91,6 +227,9 @@ jobs:
           - app_version: '1.15.5'
             chart_version: '4.15.5'
             upstream_chart_tag: 'helm-chart-4.15.5'
+          - app_version: '1.15.5'
+            chart_version: '4.15.7'
+            upstream_chart_tag: 'helm-chart-4.15.7'
     permissions:
       contents: read
       packages: write
@@ -116,7 +255,7 @@ jobs:
         with:
           driver-opts: |
             image=moby/buildkit:buildx-stable-1
-          config-inline: |
+          buildkitd-config-inline: |
             [registry."docker.io"]
               mirrors = ["mirror.gcr.io"]
         
@@ -172,22 +311,35 @@ jobs:
           docker tag "mirror.gcr.io/library/${IMAGE}" "${IMAGE}"
           docker tag "mirror.gcr.io/library/${IMAGE}" "docker.io/library/${IMAGE}"
 
-      - name: Build and push images to Docker Hub
-        env:
-          TAG: ${{ steps.meta.outputs.version }}
-          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
-        run: |
-          echo "Building from fork: ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
-          echo "Pushing to: ${REGISTRY}"
-          
-          make release
-      
       - name: Install crane
         uses: imjasonh/setup-crane@v0.4
 
+      - name: Build and push images to Docker Hub
+        env:
+          TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
+          REGISTRY: ${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
+          TAG_SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+        run: |
+          set -euo pipefail
+          BASE_TAG=$(cat images/nginx/TAG)${TAG_SUFFIX}
+          BASE_REF="${REGISTRY}/nginx:${BASE_TAG}"
+          # Pin FROM to the exact digest of the base we just built and merged.
+          # crane queries the registry directly (bypassing the docker mirror), and
+          # a digest pin makes the pull content-addressed: immune to tag mutation
+          # or pull-through-cache staleness. This is what guarantees the controller
+          # layers on the freshly rebuilt base, never a stale cached one.
+          BASE_DIGEST=$(crane digest "${BASE_REF}")
+          BASE_IMAGE="${REGISTRY}/nginx@${BASE_DIGEST}"
+          echo "Building from fork: ${{ env.FORK_REPO }}@${{ matrix.upstream_chart_tag }}"
+          echo "Pushing to: ${REGISTRY} (tag ${TAG})"
+          echo "Pinned base image: ${BASE_IMAGE} (resolved from ${BASE_REF})"
+
+          make release BASE_IMAGE=${BASE_IMAGE} \
+            PLATFORMS="${{ env.GO_PLATFORMS }}" BUILDX_PLATFORMS=${{ env.BUILD_PLATFORMS }}
+
       - name: Mirror images to GHCR
         env:
-          TAG: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
           GHCR_PREFIX: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}
         run: |
           set -euo pipefail
@@ -218,26 +370,38 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | helm registry login registry-1.docker.io \
             --username ${{ secrets.DOCKERHUB_USERNAME }} \
             --password-stdin
-      
-      - name: Package and push Helm chart
+
+      - name: Log in to GHCR with Helm
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.GHCR_REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password-stdin
+
+      - name: Package and push Helm chart to Docker Hub and GHCR
         env:
-          CHART_VERSION: ${{ matrix.chart_version }}
+          CHART_VERSION: ${{ matrix.chart_version }}${{ needs.prepare.outputs.tag_suffix }}
           DOCKER_ORG: ${{ env.DOCKER_ORG }}
+          GHCR_ORG: ${{ env.GHCR_ORG }}
+          GHCR_REGISTRY: ${{ env.GHCR_REGISTRY }}
         run: |
           # Navigate to the chart directory
           cd charts/ingress-nginx
-          
+
           # Package the chart
           helm package . --version ${CHART_VERSION}
-          
+
           # Push to Docker Hub as OCI artifact
           helm push ingress-nginx-${CHART_VERSION}.tgz oci://registry-1.docker.io/${DOCKER_ORG}
-          
+
+          # Push to GHCR as OCI artifact
+          helm push ingress-nginx-${CHART_VERSION}.tgz oci://${GHCR_REGISTRY}/${GHCR_ORG}
+
           echo "Pushed Helm chart to oci://registry-1.docker.io/${DOCKER_ORG}/ingress-nginx:${CHART_VERSION}"
+          echo "Pushed Helm chart to oci://${GHCR_REGISTRY}/${GHCR_ORG}/ingress-nginx:${CHART_VERSION}"
 
       - name: Generate build summary
         run: |
-          VERSION=${{ steps.meta.outputs.version }}
+          VERSION=${{ steps.meta.outputs.version }}${{ needs.prepare.outputs.tag_suffix }}
           REGISTRY=${{ env.REGISTRY }}/${{ env.DOCKER_ORG }}
           
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY

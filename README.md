@@ -49,29 +49,16 @@ Our build workflow is responsible for pushing updated OCI packages to Docker Hub
 
 We currently build the following versions:
 
-| Helm Chart Version | Controller Image Tag | Image Repository | Chart Repository | Status |
-|--------------------|---------------------|------------------|------------------|------------------|
-| 4.11.5             | v1.11.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.12.1             | v1.12.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.12.8             | v1.12.8             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.0             | v1.13.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.1             | v1.13.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.2             | v1.13.2             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.3             | v1.13.3             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.4             | v1.13.4             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.13.5             | v1.13.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.13.6             | v1.13.6             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.13.7             | v1.13.7             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `OFFLINE`|
-| 4.14.0             | v1.14.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.14.1             | v1.14.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
-| 4.14.2             | v1.14.2             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
-| 4.14.3             | v1.14.3             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
-| 4.14.4             | v1.14.4             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
-| 4.14.5             | v1.14.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
-| 4.15.0             | v1.15.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
-| 4.15.1             | v1.15.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE`|
+| Helm Chart Version | Controller Image Tag | Base Image Tag | Image Repository | Chart Repository | Status |
+|--------------------|---------------------|----------------|------------------|------------------|------------------|
+| 4.12.1             | v1.12.1             | v1.2.1  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.14.0             | v1.14.0             | v2.2.4  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.15.0             | v1.15.0             | v2.2.8  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.15.1             | v1.15.1             | v2.2.9  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.15.5             | v1.15.5             | v2.2.9  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.15.7             | v1.15.5             | v2.2.12 | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
 
-Here, the status field refers to which tags are actually available in the Chainguard repo(and hence are being pulled over here for builds).
+Here, the status field refers to which tags are actually available in the Chainguard repo(and hence are being pulled over here for builds). Images are built for `linux/amd64` and `linux/arm64`. The base image tag is the nginx base (`images/nginx/TAG` in the fork) that each controller is built on top of; we rebuild and push it to `porterhub/nginx` (and `ghcr.io/porter-dev/ingress-nginx-nginx`) on every run so OS/CVE fixes land even when the controller version is unchanged.
 
 ## Running a fresh build
 
