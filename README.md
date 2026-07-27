@@ -56,6 +56,7 @@ We currently build the following versions:
 | 4.15.0             | v1.15.0             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
 | 4.15.1             | v1.15.1             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
 | 4.15.5             | v1.15.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+| 4.15.7             | v1.15.5             | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
 
 Here, the status field refers to which tags are actually available in the Chainguard repo(and hence are being pulled over here for builds). Images are built for `linux/amd64` and `linux/arm64`.
 
