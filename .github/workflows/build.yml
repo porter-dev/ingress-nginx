@@ -227,7 +227,7 @@ jobs:
           - app_version: '1.15.5'
             chart_version: '4.15.5'
             upstream_chart_tag: 'helm-chart-4.15.5'
-          - app_version: '1.15.5'
+          - app_version: '1.15.6'
             chart_version: '4.15.7'
             upstream_chart_tag: 'helm-chart-4.15.7'
     permissions:
@@ -276,16 +276,14 @@ jobs:
       - name: Extract metadata
         id: meta
         run: |
-          if [ -f TAG ]; then
-            VERSION=$(cat TAG)
-          else
-            VERSION="${GITHUB_SHA::8}"
-          fi
-          
-          if [[ "${{ matrix.upstream_chart_tag }}" =~ ^v[0-9] ]]; then
-            VERSION="${{ matrix.upstream_chart_tag }}"
-          fi
-          
+          # The controller image tag is the chart's appVersion, declared
+          # authoritatively per-entry in the matrix. We deliberately do NOT
+          # read the fork's TAG file here: Chainguard sometimes ships a chart
+          # whose appVersion has moved on while TAG lags behind (e.g. chart
+          # 4.15.7 bumps to v1.15.6 but leaves TAG at v1.15.5). Trusting TAG
+          # would mislabel the image and clobber a prior version.
+          VERSION="v${{ matrix.app_version }}"
+
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
       
