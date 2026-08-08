@@ -206,7 +206,6 @@ jobs:
     needs: [prepare, merge-nginx-base]
     strategy:
       fail-fast: false
-      max-parallel: 4
       matrix:
         # Curated set of chart versions to build. The prepare job derives the
         # nginx base-image matrix from this list, so editing here also adjusts
