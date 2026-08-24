@@ -29,12 +29,18 @@ env:
   # emulation (git EFAULT during the ModSecurity clone).
   BUILD_PLATFORMS: linux/amd64,linux/arm64
   GO_PLATFORMS: amd64 arm64
+  # THE knob: the controller minor lines we support. Every run auto-builds the
+  # latest upstream controller-v<minor>.<patch> tag for each of these, so new
+  # patches AND their (CVE-patched) nginx base images are picked up with zero
+  # edits. Add a line here only when you want to start supporting a new minor.
+  SUPPORTED_MINORS: "1.12 1.14 1.15"
 
 jobs:
   prepare:
-    name: "Resolve nginx base image matrix"
+    name: "Resolve controller + nginx base matrix"
     runs-on: ubicloud-standard-2
     outputs:
+      controller_matrix: ${{ steps.resolve.outputs.controller_matrix }}
       base_matrix: ${{ steps.resolve.outputs.base_matrix }}
       base_build_matrix: ${{ steps.resolve.outputs.base_build_matrix }}
       tag_suffix: ${{ steps.suffix.outputs.tag_suffix }}
@@ -58,44 +64,72 @@ jobs:
             echo "tag_suffix=-${sanitized}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve deduped base image matrix
+      - name: Resolve controller + deduped base image matrix
         id: resolve
         env:
           FORK_REPO: ${{ env.FORK_REPO }}
+          SUPPORTED_MINORS: ${{ env.SUPPORTED_MINORS }}
         run: |
           set -euo pipefail
 
-          # Ensure yq (mikefarah) is available.
-          if ! command -v yq >/dev/null 2>&1; then
-            sudo curl -fsSL -o /usr/local/bin/yq \
-              https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
-            sudo chmod +x /usr/local/bin/yq
-          fi
+          # Discover every controller-v* tag in the fork (no auth needed for a
+          # public repo, and ls-remote avoids API pagination). Strip the
+          # peeled "^{}" deref lines and any pre-release (-alpha/-beta) tags.
+          all_tags=$(git ls-remote --tags "https://github.com/${FORK_REPO}.git" 'refs/tags/controller-v*' \
+            | sed 's#.*refs/tags/##' | grep -v '\^{}' | grep -vE -- '-(alpha|beta|rc)')
 
-          # The controller matrix in this workflow is the single source of truth
-          # for supported versions. For each branch, read images/nginx/TAG from
-          # the fork and dedupe by base tag, keeping the first branch that
-          # references each base as the one to build it from.
-          declare -A seen
-          items='[]'
-          while IFS= read -r ref; do
-            [ -n "$ref" ] || continue
-            base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${ref}/images/nginx/TAG" | tr -d '[:space:]')
-            if [ -z "${seen[$base_tag]:-}" ]; then
-              seen[$base_tag]=1
-              items=$(jq -c --arg bt "$base_tag" --arg ref "$ref" \
-                '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$items")
+          # For each supported minor line, take the newest patch. That tag's
+          # images/nginx/TAG is, by construction, the newest base for the line -
+          # which is why tracking latest-patch keeps the base worry-free.
+          controller='[]'
+          base_items='[]'
+          declare -A seen_base
+          for minor in ${SUPPORTED_MINORS}; do
+            latest=$(printf '%s\n' "$all_tags" \
+              | grep -E "^controller-v${minor}\.[0-9]+$" \
+              | sort -V | tail -1)
+            if [ -z "$latest" ]; then
+              echo "ERROR: no controller-v${minor}.* tag found upstream" >&2
+              exit 1
             fi
-          done < <(yq '.jobs.build-ingress-nginx.strategy.matrix.include[].upstream_chart_tag' .github/workflows/build.yml)
+
+            # Derive versions from the tag name, NOT the fork's internal files:
+            # Chainguard sometimes leaves TAG/Chart.yaml stale on a tag (e.g.
+            # controller-v1.15.10 still says appVersion 1.15.6). The tag name is
+            # the authoritative, collision-free identifier.
+            app_version="${latest#controller-v}"        # e.g. 1.15.10
+            IFS=. read -r _maj min pat <<<"${app_version}"
+            chart_version="4.${min}.${pat}"             # e.g. 4.15.10
+
+            base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${latest}/images/nginx/TAG" | tr -d '[:space:]')
+            if [ -z "$base_tag" ]; then
+              echo "ERROR: could not read images/nginx/TAG at ${latest}" >&2
+              exit 1
+            fi
+            echo "minor ${minor} -> ${latest} (image v${app_version}, chart ${chart_version}, base ${base_tag})"
+
+            controller=$(jq -c --arg av "$app_version" --arg cv "$chart_version" --arg ref "$latest" \
+              '. + [{app_version: $av, chart_version: $cv, upstream_chart_tag: $ref}]' <<<"$controller")
+
+            # Dedupe base builds: distinct minors can share a base tag.
+            if [ -z "${seen_base[$base_tag]:-}" ]; then
+              seen_base[$base_tag]=1
+              base_items=$(jq -c --arg bt "$base_tag" --arg ref "$latest" \
+                '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$base_items")
+            fi
+          done
 
           # Fan each base out into one native per-arch build (amd64 + arm64).
-          build_items=$(jq -c '[ .[] | . as $b | ("amd64","arm64") | $b + {arch: .} ]' <<<"$items")
+          build_items=$(jq -c '[ .[] | . as $b | ("amd64","arm64") | $b + {arch: .} ]' <<<"$base_items")
 
+          echo "Resolved controller matrix:"
+          jq . <<<"$controller"
           echo "Resolved base image matrix (merge):"
-          jq . <<<"$items"
+          jq . <<<"$base_items"
           echo "Resolved per-arch base build matrix:"
           jq . <<<"$build_items"
-          echo "base_matrix={\"include\":${items}}" >> "$GITHUB_OUTPUT"
+          echo "controller_matrix={\"include\":${controller}}" >> "$GITHUB_OUTPUT"
+          echo "base_matrix={\"include\":${base_items}}" >> "$GITHUB_OUTPUT"
           echo "base_build_matrix={\"include\":${build_items}}" >> "$GITHUB_OUTPUT"
 
   build-nginx-base:
@@ -207,32 +241,9 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 4
-      matrix:
-        # Curated set of chart versions to build. The prepare job derives the
-        # nginx base-image matrix from this list, so editing here also adjusts
-        # which base images get built.
-        include:
-          - app_version: '1.12.1'
-            chart_version: '4.12.1'
-            upstream_chart_tag: 'helm-chart-4.12.1'
-          - app_version: '1.14.0'
-            chart_version: '4.14.0'
-            upstream_chart_tag: 'helm-chart-4.14.0'
-          - app_version: '1.15.0'
-            chart_version: '4.15.0'
-            upstream_chart_tag: 'helm-chart-4.15.0'
-          - app_version: '1.15.1'
-            chart_version: '4.15.1'
-            upstream_chart_tag: 'helm-chart-4.15.1'
-          - app_version: '1.15.5'
-            chart_version: '4.15.5'
-            upstream_chart_tag: 'helm-chart-4.15.5'
-          - app_version: '1.15.6'
-            chart_version: '4.15.7'
-            upstream_chart_tag: 'helm-chart-4.15.7'
-          - app_version: '1.15.10'
-            chart_version: '4.15.10'
-            upstream_chart_tag: 'controller-v1.15.10'
+      # Dynamically resolved by the prepare job: the latest upstream
+      # controller-v<minor>.<patch> tag for each line in SUPPORTED_MINORS.
+      matrix: ${{ fromJson(needs.prepare.outputs.controller_matrix) }}
     permissions:
       contents: read
       packages: write

@@ -47,19 +47,36 @@ Our build workflow is responsible for pushing updated OCI packages to Docker Hub
 
 ## Supported versions
 
-We currently build the following versions:
+We don't pin individual versions anymore. Instead the workflow tracks a set of
+**controller minor lines** (the `SUPPORTED_MINORS` knob in [`build.yml`](./.github/workflows/build.yml)),
+and on every run the `prepare` job discovers the **latest upstream `controller-v<minor>.<patch>` tag**
+for each line and builds it. Because the newest patch always carries the newest
+nginx base, this means new controller patches **and** their CVE-patched base
+images are picked up automatically — nobody has to edit the matrix when
+Chainguard ships a rebuild.
 
-| Helm Chart Version | Controller Image Tag | Base Image Tag | Image Repository | Chart Repository | Status |
-|--------------------|---------------------|----------------|------------------|------------------|------------------|
-| 4.12.1             | v1.12.1             | v1.2.1  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.14.0             | v1.14.0             | v2.2.4  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.15.0             | v1.15.0             | v2.2.8  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.15.1             | v1.15.1             | v2.2.9  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.15.5             | v1.15.5             | v2.2.9  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.15.7             | v1.15.6             | v2.2.12 | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
-| 4.15.10            | v1.15.10            | v2.2.13 | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx | `ONLINE` |
+Currently tracked lines: **1.12, 1.14, 1.15**. As of the latest run that
+resolves to:
 
-Here, the status field refers to which tags are actually available in the Chainguard repo(and hence are being pulled over here for builds). Images are built for `linux/amd64` and `linux/arm64`. The base image tag is the nginx base (`images/nginx/TAG` in the fork) that each controller is built on top of; we rebuild and push it to `porterhub/nginx` (and `ghcr.io/porter-dev/ingress-nginx-nginx`) on every run so OS/CVE fixes land even when the controller version is unchanged.
+| Helm Chart Version | Controller Image Tag | Base Image Tag | Image Repository | Chart Repository |
+|--------------------|---------------------|----------------|------------------|------------------|
+| 4.12.8             | v1.12.8             | v1.3.4  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.14.5             | v1.14.5             | v2.2.9  | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+| 4.15.10            | v1.15.10            | v2.2.13 | ghcr.io/porter-dev/ingress-nginx-controller | oci://registry-1.docker.io/porterhub/ingress-nginx |
+
+This table is a **snapshot** — the actual versions float to whatever the newest
+patch of each line is at build time. The controller image tag and chart version
+are derived from the upstream **tag name** (e.g. `controller-v1.15.10` → image
+`v1.15.10`, chart `4.15.10`), not the fork's internal `TAG`/`Chart.yaml`, since
+Chainguard sometimes leaves those stale. Images are built for `linux/amd64` and
+`linux/arm64`. The base image tag is the nginx base (`images/nginx/TAG` in the
+fork) that each controller is built on top of; we rebuild it from source and
+push it to `porterhub/nginx` (and `ghcr.io/porter-dev/ingress-nginx-nginx`) on
+every run, then pin each controller to it **by digest**, so OS/CVE fixes land
+even when the controller code itself is unchanged.
+
+To start supporting a new minor line (e.g. `1.16`), add it to `SUPPORTED_MINORS`
+in the workflow — that's the only edit ever required.
 
 ## Running a fresh build
 
