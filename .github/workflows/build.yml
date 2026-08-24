@@ -230,6 +230,9 @@ jobs:
           - app_version: '1.15.6'
             chart_version: '4.15.7'
             upstream_chart_tag: 'helm-chart-4.15.7'
+          - app_version: '1.15.10'
+            chart_version: '4.15.7'
+            upstream_chart_tag: 'helm-chart-4.15.7'
     permissions:
       contents: read
       packages: write
