@@ -5,6 +5,12 @@ on:
     - cron: '0 3 * * 2'
   workflow_dispatch:
     inputs:
+      fork_ref:
+        description: 'Build this commit (SHA or tag) instead of discovering the newest controller tags'
+        required: false
+      app_version:
+        description: 'Controller version that fork_ref carries, e.g. 1.15.12 (required with fork_ref)'
+        required: false
       fork_repo:
         description: 'Fork repository (owner/repo)'
         required: false
@@ -69,55 +75,74 @@ jobs:
         env:
           FORK_REPO: ${{ env.FORK_REPO }}
           SUPPORTED_MINORS: ${{ env.SUPPORTED_MINORS }}
+          FORK_REF: ${{ github.event.inputs.fork_ref }}
+          APP_VERSION: ${{ github.event.inputs.app_version }}
         run: |
           set -euo pipefail
 
-          # Discover every controller-v* tag in the fork (no auth needed for a
-          # public repo, and ls-remote avoids API pagination). Strip the
-          # peeled "^{}" deref lines and any pre-release (-alpha/-beta) tags.
-          all_tags=$(git ls-remote --tags "https://github.com/${FORK_REPO}.git" 'refs/tags/controller-v*' \
-            | sed 's#.*refs/tags/##' | grep -v '\^{}' | grep -vE -- '-(alpha|beta|rc)')
-
-          # For each supported minor line, take the newest patch. That tag's
-          # images/nginx/TAG is, by construction, the newest base for the line -
-          # which is why tracking latest-patch keeps the base worry-free.
           controller='[]'
           base_items='[]'
-          declare -A seen_base
-          for minor in ${SUPPORTED_MINORS}; do
-            latest=$(printf '%s\n' "$all_tags" \
-              | grep -E "^controller-v${minor}\.[0-9]+$" \
-              | sort -V | tail -1)
-            if [ -z "$latest" ]; then
-              echo "ERROR: no controller-v${minor}.* tag found upstream" >&2
-              exit 1
-            fi
-
-            # Derive versions from the tag name, NOT the fork's internal files:
-            # Chainguard sometimes leaves TAG/Chart.yaml stale on a tag (e.g.
-            # controller-v1.15.10 still says appVersion 1.15.6). The tag name is
-            # the authoritative, collision-free identifier.
-            app_version="${latest#controller-v}"        # e.g. 1.15.10
-            IFS=. read -r _maj min pat <<<"${app_version}"
-            chart_version="4.${min}.${pat}"             # e.g. 4.15.10
-
-            base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${latest}/images/nginx/TAG" | tr -d '[:space:]')
+          if [ -n "${FORK_REF:-}" ]; then
+            # Build one explicit commit. Its versions come from the inputs, since a
+            # commit has no controller-v* tag name to derive them from.
+            : "${APP_VERSION:?app_version is required with fork_ref}"
+            IFS=. read -r _maj min pat <<<"${APP_VERSION}"
+            base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${FORK_REF}/images/nginx/TAG" | tr -d '[:space:]')
             if [ -z "$base_tag" ]; then
-              echo "ERROR: could not read images/nginx/TAG at ${latest}" >&2
+              echo "ERROR: could not read images/nginx/TAG at ${FORK_REF}" >&2
               exit 1
             fi
-            echo "minor ${minor} -> ${latest} (image v${app_version}, chart ${chart_version}, base ${base_tag})"
+            echo "explicit ref ${FORK_REF} -> image v${APP_VERSION}, chart 4.${min}.${pat}, base ${base_tag}"
+            controller=$(jq -nc --arg av "$APP_VERSION" --arg cv "4.${min}.${pat}" --arg ref "$FORK_REF" \
+              '[{app_version: $av, chart_version: $cv, upstream_chart_tag: $ref}]')
+            base_items=$(jq -nc --arg bt "$base_tag" --arg ref "$FORK_REF" \
+              '[{base_tag: $bt, upstream_chart_tag: $ref}]')
+          else
+            # Discover every controller-v* tag in the fork (no auth needed for a
+            # public repo, and ls-remote avoids API pagination). Strip the
+            # peeled "^{}" deref lines and any pre-release (-alpha/-beta) tags.
+            all_tags=$(git ls-remote --tags "https://github.com/${FORK_REPO}.git" 'refs/tags/controller-v*' \
+              | sed 's#.*refs/tags/##' | grep -v '\^{}' | grep -vE -- '-(alpha|beta|rc)')
 
-            controller=$(jq -c --arg av "$app_version" --arg cv "$chart_version" --arg ref "$latest" \
-              '. + [{app_version: $av, chart_version: $cv, upstream_chart_tag: $ref}]' <<<"$controller")
+            # For each supported minor line, take the newest patch. That tag's
+            # images/nginx/TAG is, by construction, the newest base for the line -
+            # which is why tracking latest-patch keeps the base worry-free.
+            declare -A seen_base
+            for minor in ${SUPPORTED_MINORS}; do
+              latest=$(printf '%s\n' "$all_tags" \
+                | grep -E "^controller-v${minor}\.[0-9]+$" \
+                | sort -V | tail -1)
+              if [ -z "$latest" ]; then
+                echo "ERROR: no controller-v${minor}.* tag found upstream" >&2
+                exit 1
+              fi
 
-            # Dedupe base builds: distinct minors can share a base tag.
-            if [ -z "${seen_base[$base_tag]:-}" ]; then
-              seen_base[$base_tag]=1
-              base_items=$(jq -c --arg bt "$base_tag" --arg ref "$latest" \
-                '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$base_items")
-            fi
-          done
+              # Derive versions from the tag name, NOT the fork's internal files:
+              # Chainguard sometimes leaves TAG/Chart.yaml stale on a tag (e.g.
+              # controller-v1.15.10 still says appVersion 1.15.6). The tag name is
+              # the authoritative, collision-free identifier.
+              app_version="${latest#controller-v}"        # e.g. 1.15.10
+              IFS=. read -r _maj min pat <<<"${app_version}"
+              chart_version="4.${min}.${pat}"             # e.g. 4.15.10
+
+              base_tag=$(curl -fsSL "https://raw.githubusercontent.com/${FORK_REPO}/${latest}/images/nginx/TAG" | tr -d '[:space:]')
+              if [ -z "$base_tag" ]; then
+                echo "ERROR: could not read images/nginx/TAG at ${latest}" >&2
+                exit 1
+              fi
+              echo "minor ${minor} -> ${latest} (image v${app_version}, chart ${chart_version}, base ${base_tag})"
+
+              controller=$(jq -c --arg av "$app_version" --arg cv "$chart_version" --arg ref "$latest" \
+                '. + [{app_version: $av, chart_version: $cv, upstream_chart_tag: $ref}]' <<<"$controller")
+
+              # Dedupe base builds: distinct minors can share a base tag.
+              if [ -z "${seen_base[$base_tag]:-}" ]; then
+                seen_base[$base_tag]=1
+                base_items=$(jq -c --arg bt "$base_tag" --arg ref "$latest" \
+                  '. + [{base_tag: $bt, upstream_chart_tag: $ref}]' <<<"$base_items")
+              fi
+            done
+          fi
 
           # Fan each base out into one native per-arch build (amd64 + arm64).
           build_items=$(jq -c '[ .[] | . as $b | ("amd64","arm64") | $b + {arch: .} ]' <<<"$base_items")
